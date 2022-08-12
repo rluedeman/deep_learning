@@ -1,0 +1,45 @@
+version: '3.3'
+
+services:
+  # Note: If using "docker-compose run", no ports will be mapped
+  # Run a bash shell locally
+  api:
+    image: rluedeman/gan-pipeline
+    ports:
+      - "5000:5000"
+    working_dir: /src
+    command: bash -c "uvicorn gan_pipeline.app.gan_pipeline_api:app --host 0.0.0.0 --port 5000 --reload"
+    env_file:
+      - env.txt
+    volumes:
+      # Bind the host machine folders
+      - type: "bind"
+        source: "C:\\Users\\rober\\Dropbox\\projects\\fun\\deep_learning"
+        target: "/src"
+    sysctls:
+      net.ipv4.tcp_keepalive_intvl: '45'
+      net.ipv4.tcp_keepalive_probes: '15'
+      net.ipv4.tcp_keepalive_time: '120'
+    depends_on:
+      - redis-service
+      - rq-worker
+  redis-service:
+    image: redis:7.0.4-alpine
+    restart: always
+    ports: 
+      - '6379:6379'
+    command: redis-server
+  rq-worker:
+    image: rluedeman/gan-pipeline
+    deploy: 
+      replicas: 2
+    command: bash -c "rq worker --with-scheduler --url=redis://redis-service:6379"
+    env_file:
+      - env.txt
+    volumes:
+      # Bind the host machine folders
+      - type: "bind"
+        source: "C:\\Users\\rober\\Dropbox\\projects\\fun\\deep_learning"
+        target: "/src"
+    depends_on:
+      - redis-service

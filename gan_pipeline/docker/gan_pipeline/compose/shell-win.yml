@@ -1,0 +1,30 @@
+version: '3.3'
+
+services:
+  # Note: If using "docker-compose run", no ports will be mapped
+  # Run a bash shell locally
+  bash_shell:
+    image: rluedeman/gan-pipeline
+    ports:
+      - "5000:5000"
+    working_dir: /
+    command: /bin/bash
+    env_file:
+      - env.txt
+    volumes:
+      # Bind the host machine folders
+      - type: "bind"
+        source: "C:\\Users\\rober\\Dropbox\\projects\\fun\\deep_learning"
+        target: "/src"
+    sysctls:
+      net.ipv4.tcp_keepalive_intvl: '45'
+      net.ipv4.tcp_keepalive_probes: '15'
+      net.ipv4.tcp_keepalive_time: '120'
+    depends_on:
+      - redis
+  redis:
+    image: redis:7.0.4-alpine
+    restart: always
+    ports: 
+      - '6379:6379'
+    command: redis-server

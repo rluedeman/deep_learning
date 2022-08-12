@@ -1,0 +1,34 @@
+version: '3.3'
+
+services:
+  # Note: If using "docker-compose run", no ports will be mapped
+  # Run a bash shell locally
+  bash_shell:
+    # Add the gpus
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0", "1"]
+              capabilities: [gpu]
+    image: rluedeman/learning-deep-tensorflow
+    working_dir: /
+    command: /bin/bash
+    env_file:
+      - env.txt
+    volumes:
+      # Bind the host machine folders
+      - type: "bind"
+        source: "/home/rluedeman/DeepLearning"
+        target: "/src"
+      - type: "bind"
+        source: "/home/rluedeman/.cache"
+        target: "/root/.cache"
+      - type: "bind"
+        source: "/home/rluedeman/.NudeNet"
+        target: "/root/.NudeNet"
+    sysctls:
+      net.ipv4.tcp_keepalive_intvl: '45'
+      net.ipv4.tcp_keepalive_probes: '15'
+      net.ipv4.tcp_keepalive_time: '120'

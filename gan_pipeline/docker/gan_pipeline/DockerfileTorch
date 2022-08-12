@@ -1,0 +1,21 @@
+# syntax=docker/dockerfile:1
+FROM pytorch/pytorch:1.11.0-cuda11.3-cudnn8-runtime
+
+# Apt-get requirements
+RUN apt-get update && \
+    apt-get install -y python3-opencv && \
+    apt-get install -y emacs && \
+    apt-get install -y git
+
+# Pip requirements
+WORKDIR /
+ADD ./requirements.txt /requirements.txt
+RUN pip install -r /requirements.txt
+RUN pip install git+https://github.com/elliottzheng/face-detection.git@master
+
+# Copy over source code
+COPY . /
+WORKDIR /
+
+# Environment
+ENV PYTHONPATH "${PYTHONPATH}:/src/"
