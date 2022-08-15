@@ -1,6 +1,7 @@
 from functools import lru_cache
 from hashlib import sha256
 from io import BytesIO
+from lib2to3.pytree import Base
 import os
 import pickle
 import sys
@@ -12,7 +13,7 @@ from tqdm import tqdm
 
 from gan_pipeline.app.config import DATASETS_PATH
 from gan_pipeline.img_getter.flickr_imggetter import FlickrImgGetter
-
+from gan_pipeline.similarity import SimilarImgGetter
 
 class GanPipelineMissingException(Exception):
     pass
@@ -47,7 +48,16 @@ class FilterCalibrationImagesRequest(BaseModel):
     """
     Pydantic model for FilterCalibrationImagesRequest.
     """
-    threshold = 0.85
+    min_threshold = 0.85
+    max_threshold = 1.0
+    num_images: int
+
+
+class FilterCalibrationImagesResponse(BaseModel):
+    """
+    Pydantic model for FilterCalibrationImagesResponse.
+    """
+    images: list
 
 
 ####################
@@ -146,6 +156,17 @@ class GanPipelineModel():
 
         return False
 
+    def is_valid_img(self, img_url: str) -> bool:
+        """
+        Check if an image is valid.
+        """
+        try:
+            img = self.fetch_image_at_url(img_url)
+            # Confirm the image is RGB
+            return img.mode == 'RGB'
+        except Exception:
+            return False
+
     @lru_cache(maxsize=100)
     def fetch_image_at_url(self, img_url: str) -> Image:
         """
@@ -185,7 +206,27 @@ class GanPipelineModel():
         if len(self.image_cache['urls']) - self.image_cache['img_count_last_saved'] > 100:
             self.save_image_cache()
             self.image_cache['img_count_last_saved'] = len(self.image_cache['urls'])
-        
+    
+    #####################
+    # Image Access Helpers
+    #####################
+    def get_calibration_image_with_id(self, img_id: str) -> Image:  
+        """
+        Get an image from the calibration directory.
+        """
+        img_path = os.path.join(self.calibration_path, f"{img_id}.jpg")
+        if not os.path.exists(img_path):
+            img_path = os.path.join(self.calibration_path, f"{img_id}.png")
+        return Image.open(img_path)
+
+    def get_target_image_with_id(self, img_id: str) -> Image:
+        """
+        Get an image from the target directory.
+        """
+        img_path = os.path.join(self.target_path, f"{img_id}.jpg")
+        if not os.path.exists(img_path):
+            img_path = os.path.join(self.calibration_path, f"{img_id}.png")
+        return Image.open(img_path)
 
     ######################
     # Calibration
@@ -214,18 +255,17 @@ class GanPipelineModel():
                 if num_images >= calibration_request.num_images:
                     break
 
-    def filter_calibration_images(self, filter_request: FilterCalibrationImagesRequest):
+    def filter_calibration_images(self, filter_request: FilterCalibrationImagesRequest) -> FilterCalibrationImagesResponse:
         """
         Filter the calibration images.
         """
-        # Load the images
-        img_paths = glob.glob(os.path.join(self.calibration_path, '*.jpg'))
-        images = [Image.open(img_path) for img_path in img_paths]
-        # Filter the images
-        filtered_images = filter_images(images, filter_request.filter_type, filter_request.filter_params)
-        # Save the filtered images
-        for i, img in enumerate(filtered_images):
-            img_path = os.path.join(self.calibration_path, f"{i}.jpg")
-            img.save(img_path)
+        # TODO: Add support for min/max thresholds as well as limiting the number of calibration images considered
+        sim = SimilarImgGetter(
+            target_img_dir=self.target_path, 
+            raw_img_dir=self.calibration_path,
+            max_num_raw_imgs=filter_request.num_images,
+        )
+        return FilterCalibrationImagesResponse(images=sim.get_images_in_similarity_range(filter_request.min_threshold,
+                                                                                         filter_request.max_threshold))
 
 

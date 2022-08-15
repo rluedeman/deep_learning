@@ -1,13 +1,13 @@
 import os
 import random
+import sys
 
 from img2vec_pytorch import Img2Vec
 from matplotlib import pyplot as plt
 from PIL import Image
 from sklearn.metrics.pairwise import cosine_similarity
+import torch
 from tqdm import tqdm
-
-
 
 
 class SimilarImgGetter(object):
@@ -18,12 +18,13 @@ class SimilarImgGetter(object):
     """
 
     def __init__(self, target_img_dir: str = None, target_imgs: list = None, 
-                 raw_img_dir: str=None, raw_imgs: list = None) -> None:
+                 raw_img_dir: str=None, raw_imgs: list = None, max_num_raw_imgs=None) -> None:
         """
         Initialize the SimilarImgGetter.
         """
+        self.max_num_raw_imgs = max_num_raw_imgs if max_num_raw_imgs is not None else sys.maxsize
         # The model that will convert the images into feature vectors.
-        self._img2vec = Img2Vec(cuda=True, model="resnet18", layer="default")
+        self._img2vec = Img2Vec(cuda=torch.cuda.is_available(), model="resnet18", layer="default")
         # Set the target and raw images.
         self._set_target_imgs(target_img_dir, target_imgs)
         self._set_raw_imgs(raw_img_dir, raw_imgs)
@@ -59,14 +60,17 @@ class SimilarImgGetter(object):
             raise ValueError("Only one of raw_img_dir or raw_imgs can be specified")
         if not self.raw_img_dir and not self.raw_imgs:
             raise ValueError("One of raw_img_dir or raw_imgs must be specified")
-        
+
         # TODO: For now, assuming all datasets fit in memory. This is a risky assumption...
         # If we received a directory, extract the Images from it.
         if self.raw_img_dir:
             self.raw_img_paths = [os.path.join(raw_img_dir, f) for f in os.listdir(raw_img_dir)]
             self.raw_imgs = [Image.open(path) for path in self.raw_img_paths]
+            for idx, img in enumerate(self.raw_imgs):
+                if img.mode != "RGB":
+                    print("Invalid:", self.raw_img_paths[idx], flush=True)
 
-        self.raw_imgs = self.raw_imgs[:500]
+        self.raw_imgs = self.raw_imgs[:self.max_num_raw_imgs]
 
         # Convert the images to feature vectors.
         self.raw_vectors = []
@@ -135,4 +139,11 @@ class SimilarImgGetter(object):
         plt.show()
         return closest_target, closest_raw
 
-    # def compute_similarity(self)
+    def get_images_in_similarity_range(self, min_similarity: float, max_similarity: float) -> list:
+        """
+        Return a list of images that are above the specified similarity.
+        """
+        above_similarity = [i for i, similarity in enumerate(self.raw_similarities)
+                            if max_similarity >= similarity >= min_similarity]
+        # get the filename from the path
+        return [os.path.basename(self.raw_img_paths[i]) for i in above_similarity]
