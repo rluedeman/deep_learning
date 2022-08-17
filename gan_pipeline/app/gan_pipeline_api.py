@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse, HTMLResponse
 from gan_pipeline.app import config
 from gan_pipeline.app.models import GanPipelineMissingException
 from gan_pipeline.app.models import GanPipelineModelBase, GanPipelineModel
-from gan_pipeline.app.models import CalibrationImageRequest, FilterCalibrationImagesRequest
+from gan_pipeline.app.models import CalibrationImageRequest, FilterCalibrationImagesRequest, TrainingImagesRequest
 
 # uvicorn data_utils.services.fast_api.api:app --host 0.0.0.0 --port 5000 --reload
 app = FastAPI()
@@ -66,6 +66,22 @@ async def post_calibration_images(project_name: str, calibration_request: Calibr
         model.add_calibration_images(calibration_request)
         # config.QUEUE.enqueue(model.add_calibration_images, calibration_request)
         return calibration_request
+    except GanPipelineMissingException as e:
+        # Return a 404 error if the project doesn't exist
+        raise HTTPException(status_code=404, detail="GanPipelineModel {} does not exist.".format(project_name)) 
+
+
+@app.post("/gan_projects/{project_name}/training_images/")
+async def post_calibration_images(project_name: str, training_request: TrainingImagesRequest):
+    """
+    Add calibration images to a GanProject.
+    """
+    try:
+        print("Adding training images to {}".format(project_name))
+        model = GanPipelineModel(project_name)
+        model.add_training_images(training_request)
+        # config.QUEUE.enqueue(model.add_training_images, training_request)
+        return training_request
     except GanPipelineMissingException as e:
         # Return a 404 error if the project doesn't exist
         raise HTTPException(status_code=404, detail="GanPipelineModel {} does not exist.".format(project_name)) 

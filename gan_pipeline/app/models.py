@@ -1,3 +1,4 @@
+from ast import Str
 from functools import lru_cache
 from hashlib import sha256
 from io import BytesIO
@@ -60,6 +61,15 @@ class FilterCalibrationImagesResponse(BaseModel):
     images: list
 
 
+class TrainingImagesRequest(BaseModel):
+    """
+    Pydantic model for TrainingImagesRequest.
+    """
+    search_term: str
+    num_images: int
+    min_threshold: float = 0.85
+
+
 ####################
 # "ORM" Models
 ####################
@@ -99,6 +109,12 @@ class GanPipelineModel():
     @property
     def training_path(self) -> str:
         path = os.path.join(self.path, 'Data', 'Training')
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    @property
+    def rejects_path(self) -> str:
+        path = os.path.join(self.path, 'Data', 'Rejects')
         os.makedirs(path, exist_ok=True)
         return path
 
@@ -150,9 +166,15 @@ class GanPipelineModel():
             return True
 
         # Lastly, check the to see if the file already exists
-        img_path = os.path.join(self.calibration_path, f"{hsh}.jpg")
-        if os.path.exists(img_path):
-            return True
+        img_paths = [
+            os.path.join(self.target_path, f"{hsh}.jpg"),
+            os.path.join(self.calibration_path, f"{hsh}.jpg"),
+            os.path.join(self.training_path, f"{hsh}.jpg"),
+        ]
+
+        for img_path in img_paths:
+            if os.path.exists(img_path):
+                return True
 
         return False
 
@@ -195,11 +217,28 @@ class GanPipelineModel():
         """
         Save an image to the calibration directory.
         """
-        # Fetch and save the image
+        self._save_image_to_dir(img_url, self.calibration_path)
+
+    def save_img_to_training(self, img_url: str):
+        """
+        Save an image to the training directory.
+        """
+        self._save_image_to_dir(img_url, self.training_path)
+
+    def save_img_to_rejects(self, img_url: str):
+        """
+        Save an image to the rejects directory.
+        """
+        self._save_image_to_dir(img_url, self.rejects_path)
+
+    def _save_image_to_dir(self, img_url: str, dir: str):
+        """
+        Save an image to a path.
+        """
         img = self.fetch_image_at_url(img_url)
         hsh = sha256(img.tobytes()).hexdigest()  # Hash based on the original image
         img = self.crop_and_resize_image(img)
-        img_path = os.path.join(self.calibration_path, f"{hsh}.jpg")
+        img_path = os.path.join(dir, f"{hsh}.jpg")
         img.save(img_path)
         self.image_cache['urls'].add(img_url)
             
@@ -240,7 +279,7 @@ class GanPipelineModel():
         num_images = 0
         with tqdm(total=calibration_request.num_images) as pbar:
             for img_url in img_urls:
-                if self.has_saved_img(img_url):
+                if self.has_saved_img(img_url) or not self.is_valid_img(img_url):
                     continue
                 else:
                     self.save_img_to_calibration(img_url)
@@ -268,4 +307,43 @@ class GanPipelineModel():
         return FilterCalibrationImagesResponse(images=sim.get_images_in_similarity_range(filter_request.min_threshold,
                                                                                          filter_request.max_threshold))
 
+    ######################
+    # Training
+    ######################
+    def add_training_images(self, training_request: TrainingImagesRequest):
+        """
+        Add training images to the model.
+        """
+        sim = SimilarImgGetter(
+            target_img_dir=self.target_path, 
+            raw_img_dir=self.training_path,
+            max_num_raw_imgs=0,
+        )
+        flickr_img_getter = FlickrImgGetter()
+        img_urls = flickr_img_getter.get_img_urls(training_request.search_term)
+        num_images = 0
+        with tqdm(total=training_request.num_images) as pbar:
+            for img_url in img_urls:
+                # Do we already have the image? If so, skip it.
+                if self.has_saved_img(img_url) or not self.is_valid_img(img_url):
+                    continue
+                
+                # Is the image similar enough to our target set?
+                img = self.fetch_image_at_url(img_url)
+                similarity = sim.get_image_similarity(img)
+                if similarity < training_request.min_threshold:
+                    self.save_img_to_rejects(img_url)
+                    continue
 
+                # Save the image
+                self.save_img_to_training(img_url)
+                num_images += 1
+                pbar.update(1)
+                sys.stderr.flush()
+                pbar.refresh()
+                sys.stdout.flush()
+                sys.stderr.flush()
+                print("\r", flush=True)
+            
+                if num_images >= training_request.num_images:
+                    break

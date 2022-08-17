@@ -10,6 +10,7 @@ import torch
 from tqdm import tqdm
 
 
+# TODO: Refactor to not require raw images.
 class SimilarImgGetter(object):
     """
     After being initialized with a directory of target images, this class will
@@ -147,3 +148,18 @@ class SimilarImgGetter(object):
                             if max_similarity >= similarity >= min_similarity]
         # get the filename from the path
         return [os.path.basename(self.raw_img_paths[i]) for i in above_similarity]
+
+    def get_image_similarity(self, img: Image) -> float:
+        """
+        Return the similarity of the given image to the target images.
+        """
+        img_vec = self._img2vec.get_vec(img)
+        self.raw_similarities = []
+        best_similarity = 0
+        for target_vec in self.target_vectors:
+            similarity = cosine_similarity(img_vec.reshape((1, -1)),
+                                           target_vec.reshape((1, -1)))[0][0]
+            if similarity > best_similarity:
+                best_similarity = similarity
+                
+        return best_similarity
