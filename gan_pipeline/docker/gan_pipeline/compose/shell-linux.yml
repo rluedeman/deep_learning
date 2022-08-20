@@ -1,0 +1,30 @@
+version: '3.3'
+
+services:
+  # Note: If using "docker-compose run", no ports will be mapped
+  # Run a bash shell locally
+  bash_shell:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0", "1"]
+              capabilities: [gpu]
+    image: rluedeman/gan-pipeline
+    shm_size: 8gb
+    ports:
+      - "5000:5000"
+    working_dir: /
+    command: /bin/bash
+    env_file:
+      - env.txt
+    volumes:
+      # Bind the host machine folders
+      - type: "bind"
+        source: "/home/rluedeman/DeepLearning/"
+        target: "/src"
+    sysctls:
+      net.ipv4.tcp_keepalive_intvl: '45'
+      net.ipv4.tcp_keepalive_probes: '15'
+      net.ipv4.tcp_keepalive_time: '120'
