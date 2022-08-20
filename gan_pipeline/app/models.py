@@ -91,7 +91,10 @@ class GanPipelineModel():
             raise GanPipelineMissingException(f"GanPipelineModel {self.name} does not exist.")
         
         # Load the image cache
+        print("Loading image cache...")
         self.load_image_cache()
+        # print(self.image_cache['tags'])
+        # print(self.image_cache['titles'])
     
     # Path helpers
     @property
@@ -143,6 +146,11 @@ class GanPipelineModel():
         else:
             self.image_cache = {'urls': set(), 'hashes': set(), 'img_count_last_saved': 0}
             self.save_image_cache()
+        
+        if 'tags' not in self.image_cache:
+            self.image_cache['tags'] = []
+        if 'titles' not in self.image_cache:
+            self.image_cache['titles'] = []
 
     def save_image_cache(self):
         """
@@ -245,6 +253,20 @@ class GanPipelineModel():
         if len(self.image_cache['urls']) - self.image_cache['img_count_last_saved'] > 100:
             self.save_image_cache()
             self.image_cache['img_count_last_saved'] = len(self.image_cache['urls'])
+
+    def _save_tags_to_cache(self, tags: str):
+        """
+        Save tags to the cache.
+        """
+        self.image_cache['tags'].append(tags)
+        self.save_image_cache()
+
+    def _save_title_to_cache(self, title: str):
+        """
+        Save title to the cache.
+        """
+        self.image_cache['titles'].append(title)
+        self.save_image_cache()
     
     #####################
     # Image Access Helpers
@@ -320,23 +342,32 @@ class GanPipelineModel():
             max_num_raw_imgs=0,
         )
         flickr_img_getter = FlickrImgGetter()
-        img_urls = flickr_img_getter.get_img_urls(training_request.search_term)
+        # Track stats
         num_images = 0
+        has_img = 0
+        not_similar = 0
         with tqdm(total=training_request.num_images) as pbar:
-            for img_url in img_urls:
+            for flickr_img in flickr_img_getter.get_flickr_imgs(training_request.search_term):
+                print(f"Have Image: {has_img} Not Similar: {not_similar} Saved: {num_images}", flush=True)
+
                 # Do we already have the image? If so, skip it.
-                if self.has_saved_img(img_url) or not self.is_valid_img(img_url):
+                if self.has_saved_img(flickr_img.url) or not self.is_valid_img(flickr_img.url):
+                    has_img += 1                        
                     continue
+            
                 
                 # Is the image similar enough to our target set?
-                img = self.fetch_image_at_url(img_url)
+                img = self.fetch_image_at_url(flickr_img.url)
                 similarity = sim.get_image_similarity(img)
                 if similarity < training_request.min_threshold:
-                    self.save_img_to_rejects(img_url)
+                    self.save_img_to_rejects(flickr_img.url)
+                    not_similar += 1
                     continue
 
                 # Save the image
-                self.save_img_to_training(img_url)
+                self.save_img_to_training(flickr_img.url)
+                self._save_tags_to_cache(flickr_img.tags)
+                self._save_title_to_cache(flickr_img.title)
                 num_images += 1
                 pbar.update(1)
                 sys.stderr.flush()
@@ -346,4 +377,5 @@ class GanPipelineModel():
                 print("\r", flush=True)
             
                 if num_images >= training_request.num_images:
+                    self.save_image_cache()
                     break

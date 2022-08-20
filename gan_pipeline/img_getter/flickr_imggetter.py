@@ -1,10 +1,12 @@
+from datetime import datetime, timedelta
 from hashlib import sha256
 from io import BytesIO
+import time
 
 import flickrapi
 from PIL import Image
 import requests
-from typing import Tuple
+from typing import Iterable, Tuple
 
 from gan_pipeline.img_getter import config
 
@@ -17,17 +19,16 @@ class ImgGetter():
         """
         Processes the image.
         """
+        # Nothing to process for now.
         return img
-        width, height = img.size
-        # Crop Square
-        new_width = min(width,height)
-        new_height = new_width
-        left = (width - new_width)/2
-        top = (height - new_height)/2
-        right = (width + new_width)/2
-        bottom = (height + new_height)/2
-        img = img.crop((left, top, right, bottom))
-        return img
+
+
+class FlickrImg(object):
+    def __init__(self, url, title, tags):
+        self.url = url
+        self.title = title
+        self.tags = tags
+
 
 
 class FlickrImgGetter(ImgGetter):
@@ -37,12 +38,51 @@ class FlickrImgGetter(ImgGetter):
     def __init__(self):
         self.flickr_api = flickrapi.FlickrAPI(config.FLICKR_API_KEY, config.FLICKR_API_SECRET, cache=True)
 
+    def get_flickr_imgs(self, search_term: str) -> Iterable[FlickrImg]:
+        """
+        A generator that will return an iterable of FlickrImgs matching the search_term.
+        """
+        min_time = datetime(2014, 1, 1)
+        max_time = datetime(2022, 1, 1)
+        cur_time = min_time
+        time_window = timedelta(days=30)
+        while cur_time < max_time:
+            start_date = time.mktime(cur_time.timetuple())
+            end_date = time.mktime((cur_time + time_window).timetuple())
+            print("Searching:", cur_time, cur_time + time_window)
+            photos = self.flickr_api.walk(
+                # tag_mode='all',
+                # tags=search_term,
+                text=search_term,
+                extras='url_c,license,tags,machine_tags',
+                per_page=100,
+                sort='relevance',
+                min_height=512,
+                min_width=512,
+                min_upload_date=start_date,
+                max_upload_date=end_date,
+            )
+            num_photos_in_query = 0
+            for photo in photos:
+                num_photos_in_query += 1
+                url = photo.get('url_c')
+                if url:
+                    yield FlickrImg(url, photo.get('title'), photo.get('tags'))
+
+                # Don't search more than 1k photos per upload time window to avoid duplicates.
+                if num_photos_in_query >= 1000:
+                    break
+
+            cur_time += time_window
+
+
+
     def get_img_urls(self, search_term: str) -> Tuple[str, str]:
         photos = self.flickr_api.walk(
             # tag_mode='all',
             # tags=search_term,
             text=search_term,
-            extras='url_c,license',
+            extras='url_c,license,tags,machine_tags',
             per_page=100,
             sort='relevance',
             min_height=512,
