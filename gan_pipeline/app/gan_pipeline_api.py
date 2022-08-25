@@ -29,7 +29,7 @@ async def create_gan_project(project_name: str):
     """
     Create a new GanProject.
     """
-    model = GanPipelineModel(project_name)
+    model = GanPipelineModel(project_name, create=True)
     return GanPipelineModelBase.from_orm(model)
 
 
@@ -72,9 +72,9 @@ async def post_calibration_images(project_name: str, calibration_request: Calibr
 
 
 @app.post("/gan_projects/{project_name}/training_images/")
-async def post_calibration_images(project_name: str, training_request: TrainingImagesRequest):
+async def post_training_images(project_name: str, training_request: TrainingImagesRequest):
     """
-    Add calibration images to a GanProject.
+    Add training images to a GanProject.
     """
     try:
         print("Adding training images to {}".format(project_name))
