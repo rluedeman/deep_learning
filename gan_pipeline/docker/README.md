@@ -66,9 +66,9 @@ python dataset_tool.py --resolution=512x512 --source=../../datasets/gan_pipeline
 
 # Run stylegan
 cd /src/sandbox/stylegan3
-python train.py --cfg=stylegan2 --outdir ../learning_deep/experiments/results/tractors_512/ --data=../../datasets/gan_pipeline/Tractors/Data/tractors512.zip --gamma=0.4096 --gpus=2 --batch=64 --batch-gpu=32 --mirror=1 --snap=20 --map-depth=2 --glr=0.0025 --dlr=0.0025 --cbase=16384 --kimg=30000
+python train.py --cfg=stylegan2 --outdir ../learning_deep/experiments/results/tractors_512/ --data=../../datasets/gan_pipeline/Tractors/Data/tractors512_50k.zip --gamma=0.8192 --gpus=2 --batch=64 --batch-gpu=32 --mirror=1 --snap=20 --map-depth=2 --glr=0.0025 --dlr=0.0025 --cbase=16384 --kimg=30000
 
 # Resume stylegan
 cd /src/sandbox/stylegan3
-python train.py --cfg=stylegan2 --outdir ../learning_deep/experiments/results/tractors_512/ --data=../../datasets/gan_pipeline/Tractors/Data/tractors512.zip --resume=../learning_deep/experiments/results/tractors_512/00000-stylegan2-tractors512-gpus2-batch64-gamma0.4096/network-snapshot-003145.pkl --gamma=0.4096 --gpus=2 --batch=64 --batch-gpu=32 --mirror=1 --snap=20 --map-depth=2 --glr=0.001 --dlr=0.001 --cbase=16384 --kimg=30000
+python train.py --cfg=stylegan2 --outdir ../learning_deep/experiments/results/tractors_512/ --data=../../datasets/gan_pipeline/Tractors/Data/tractors512_50k.zip --gamma=0.4096 --gpus=2 --batch=64 --batch-gpu=32 --mirror=1 --snap=20 --map-depth=2 --glr=0.00125 --dlr=0.00125 --cbase=16384 --kimg=30000 --resume=../learning_deep/experiments/results/tractors_512/00011-stylegan2-tractors512_50k-gpus2-batch64-gamma0.4096/network-snapshot-002741.pkl
 
