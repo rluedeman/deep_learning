@@ -45,11 +45,11 @@ class FlickrImgGetter(ImgGetter):
         min_time = datetime(2010, 1, 1)
         max_time = datetime(2022, 1, 1)
         cur_time = min_time
-        time_window = timedelta(days=3)
+        time_window = timedelta(days=2)
         while cur_time < max_time:
             start_date = time.mktime(cur_time.timetuple())
             end_date = time.mktime((cur_time + time_window).timetuple())
-            print("Searching:", cur_time, cur_time + time_window)
+            print("****************** Date:", cur_time, cur_time + time_window)
             photos = self.flickr_api.walk(
                 # tag_mode='all',
                 # tags=search_term,
@@ -70,12 +70,10 @@ class FlickrImgGetter(ImgGetter):
                     yield FlickrImg(url, photo.get('title'), photo.get('tags'))
 
                 # Don't search more than 1k photos per upload time window to avoid duplicates.
-                if num_photos_in_query >= 100:
+                if num_photos_in_query >= 500:
                     break
 
             cur_time += time_window
-
-
 
     def get_img_urls(self, search_term: str) -> Tuple[str, str]:
         photos = self.flickr_api.walk(

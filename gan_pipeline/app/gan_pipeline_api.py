@@ -80,6 +80,7 @@ async def post_training_images(project_name: str, training_request: TrainingImag
         print("Adding training images to {}".format(project_name))
         model = GanPipelineModel(project_name)
         model.add_training_images(training_request)
+        # model.add_training_images_parallel(training_request)
         # config.QUEUE.enqueue(model.add_training_images, training_request)
         return training_request
     except GanPipelineMissingException as e:

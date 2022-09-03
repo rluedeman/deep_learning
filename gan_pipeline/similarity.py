@@ -25,10 +25,15 @@ class SimilarImgGetter(object):
         """
         self.max_num_raw_imgs = max_num_raw_imgs if max_num_raw_imgs is not None else sys.maxsize
         # The model that will convert the images into feature vectors.
+        print("Constructing Model...", flush=True)
         self._img2vec = Img2Vec(cuda=torch.cuda.is_available(), model="resnet18", layer="default")
+        print("  Model Constructed", flush=True)
         # Set the target and raw images.
+        print("Processing Target images...", flush=True)
         self._set_target_imgs(target_img_dir, target_imgs)
+        print("Processing Raw images...", flush=True)
         self._set_raw_imgs(raw_img_dir, raw_imgs)
+        print("  Images Processed", flush=True)
         # Compute the similarity of the raw imgs to the target imgs
         self._compute_target_similarities()
 
@@ -65,13 +70,11 @@ class SimilarImgGetter(object):
         # TODO: For now, assuming all datasets fit in memory. This is a risky assumption...
         # If we received a directory, extract the Images from it.
         if self.raw_img_dir:
-            self.raw_img_paths = [os.path.join(raw_img_dir, f) for f in os.listdir(raw_img_dir)]
+            self.raw_img_paths = [os.path.join(raw_img_dir, f) for f in os.listdir(raw_img_dir)[:self.max_num_raw_imgs]]
             self.raw_imgs = [Image.open(path) for path in self.raw_img_paths]
             for idx, img in enumerate(self.raw_imgs):
                 if img.mode != "RGB":
                     print("Invalid:", self.raw_img_paths[idx], flush=True)
-
-        self.raw_imgs = self.raw_imgs[:self.max_num_raw_imgs]
 
         # Convert the images to feature vectors.
         self.raw_vectors = []

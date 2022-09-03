@@ -6,12 +6,15 @@ from lib2to3.pytree import Base
 import os
 import pickle
 import sys
+import time
+from typing import Tuple
 
 from PIL import Image
 from pydantic import BaseModel
 import requests
 from tqdm import tqdm
 
+from gan_pipeline.app import config
 from gan_pipeline.app.config import DATASETS_PATH
 from gan_pipeline.img_getter.flickr_imggetter import FlickrImgGetter
 from gan_pipeline.similarity import SimilarImgGetter
@@ -93,8 +96,7 @@ class GanPipelineModel():
         # Load the image cache
         print("Loading image cache...")
         self.load_image_cache()
-        # print(self.image_cache['tags'])
-        # print(self.image_cache['titles'])
+        print("  Done.")
     
     # Path helpers
     @property
@@ -167,13 +169,13 @@ class GanPipelineModel():
         if img_url in self.image_cache['urls']:
             return True
         
-        # Now check the actual image
+        # Check the hashes to see if we fetched the image but just at a different url (CDN, etc.)
         img = self.fetch_image_at_url(img_url)
         hsh = sha256(img.tobytes()).hexdigest()
         if hsh in self.image_cache['hashes']:
             return True
 
-        # Lastly, check the to see if the file already exists
+        # Lastly, check to see if the file already exists
         img_paths = [
             os.path.join(self.target_path, f"{hsh}.jpg"),
             os.path.join(self.calibration_path, f"{hsh}.jpg"),
@@ -198,12 +200,18 @@ class GanPipelineModel():
             return False
 
     @lru_cache(maxsize=100)
-    def fetch_image_at_url(self, img_url: str) -> Image:
+    def fetch_image_at_url(self, img_url: str, num_retries: int=0) -> Image:
         """
         Fetch an image at a url.
         """
-        img_response = requests.get(img_url)
-        return Image.open(BytesIO(img_response.content))
+        if num_retries > 3:
+            # Something funky with the url. Just return a blank image.
+            return Image.new('RGB', (512, 512))
+        try:
+            img_response = requests.get(img_url)
+            return Image.open(BytesIO(img_response.content))
+        except Exception:
+            return self.fetch_image_at_url(img_url, num_retries=num_retries + 1)
 
     def crop_and_resize_image(self, img: Image) -> Image:
         """
@@ -221,25 +229,25 @@ class GanPipelineModel():
         img = img.resize((512, 512))
         return img
 
-    def save_img_to_calibration(self, img_url: str):
+    def save_img_url_to_calibration(self, img_url: str):
         """
         Save an image to the calibration directory.
         """
-        self._save_image_to_dir(img_url, self.calibration_path)
+        self._save_image_url_to_dir(img_url, self.calibration_path)
 
-    def save_img_to_training(self, img_url: str):
+    def save_img_url_to_training(self, img_url: str):
         """
         Save an image to the training directory.
         """
-        self._save_image_to_dir(img_url, self.training_path)
+        self._save_image_url_to_dir(img_url, self.training_path)
 
-    def save_img_to_rejects(self, img_url: str):
+    def save_img_url_to_rejects(self, img_url: str):
         """
         Save an image to the rejects directory.
         """
-        self._save_image_to_dir(img_url, self.rejects_path)
+        self._save_image_url_to_dir(img_url, self.rejects_path)
 
-    def _save_image_to_dir(self, img_url: str, dir: str):
+    def _save_image_url_to_dir(self, img_url: str, dir: str):
         """
         Save an image to a path.
         """
@@ -249,10 +257,23 @@ class GanPipelineModel():
         img_path = os.path.join(dir, f"{hsh}.jpg")
         img.save(img_path)
         self.image_cache['urls'].add(img_url)
+        self.image_cache['hashes'].add(hsh)
             
-        if len(self.image_cache['urls']) - self.image_cache['img_count_last_saved'] > 100:
+        if len(self.image_cache['hashes']) - self.image_cache['img_count_last_saved'] > 100:
             self.save_image_cache()
-            self.image_cache['img_count_last_saved'] = len(self.image_cache['urls'])
+            self.image_cache['img_count_last_saved'] = len(self.image_cache['hashes'])
+
+    def _save_img_to_dir(self, img: Image, dir: str):
+        """
+        Save an image to a path.
+        """
+        hsh = sha256(img.tobytes()).hexdigest()
+        img_path = os.path.join(dir, f"{hsh}.jpg")
+        img.save(img_path)
+        self.image_cache['hashes'].add(hsh)
+        if len(self.image_cache['hashes']) - self.image_cache['img_count_last_saved'] > 100:
+            self.save_image_cache()
+            self.image_cache['img_count_last_saved'] = len(self.image_cache['hashes'])
 
     def _save_tags_to_cache(self, tags: str):
         """
@@ -304,7 +325,7 @@ class GanPipelineModel():
                 if self.has_saved_img(img_url) or not self.is_valid_img(img_url):
                     continue
                 else:
-                    self.save_img_to_calibration(img_url)
+                    self.save_img_url_to_calibration(img_url)
                     num_images += 1
                     pbar.update(1)
                     sys.stderr.flush()
@@ -330,7 +351,7 @@ class GanPipelineModel():
                                                                                          filter_request.max_threshold))
 
     ######################
-    # Training
+    # Training Images
     ######################
     def add_training_images(self, training_request: TrainingImagesRequest):
         """
@@ -341,14 +362,25 @@ class GanPipelineModel():
             raw_img_dir=self.training_path,
             max_num_raw_imgs=0,
         )
+        print("Constructing Flickr image getter...", flush=True)
         flickr_img_getter = FlickrImgGetter()
         # Track stats
+        searched_images = 0
         num_images = 0
         has_img = 0
         not_similar = 0
+        print("Starting search...", flush=True)
         with tqdm(total=training_request.num_images) as pbar:
             for flickr_img in flickr_img_getter.get_flickr_imgs(training_request.search_term):
-                print(f"Have Image: {has_img} Not Similar: {not_similar} Saved: {num_images}", flush=True)
+                searched_images += 1
+                if searched_images % 10 == 0:
+                    # Add update to the progress bar
+                    pbar.set_description(f"Have Image: {has_img} | Not Similar: {not_similar} | Saved: {num_images} |||")
+                    pbar.refresh()
+                    sys.stdout.flush()
+                    sys.stderr.flush()
+                    print("\r", flush=True)
+                   
 
                 # Do we already have the image? If so, skip it.
                 if self.has_saved_img(flickr_img.url) or not self.is_valid_img(flickr_img.url):
@@ -360,22 +392,100 @@ class GanPipelineModel():
                 img = self.fetch_image_at_url(flickr_img.url)
                 similarity = sim.get_image_similarity(img)
                 if similarity < training_request.min_threshold:
-                    self.save_img_to_rejects(flickr_img.url)
+                    self.save_img_url_to_rejects(flickr_img.url)
                     not_similar += 1
                     continue
 
                 # Save the image
-                self.save_img_to_training(flickr_img.url)
+                self.save_img_url_to_training(flickr_img.url)
                 self._save_tags_to_cache(flickr_img.tags)
                 self._save_title_to_cache(flickr_img.title)
                 num_images += 1
                 pbar.update(1)
-                sys.stderr.flush()
-                pbar.refresh()
-                sys.stdout.flush()
-                sys.stderr.flush()
-                print("\r", flush=True)
             
                 if num_images >= training_request.num_images:
                     self.save_image_cache()
                     break
+
+    def add_training_images_parallel(self, training_request: TrainingImagesRequest):
+        """
+        Add training images to the model but farm out image fetching and similarity comparisons to async queues.
+        """
+        sim = SimilarImgGetter(
+            target_img_dir=self.target_path, 
+            raw_img_dir=self.training_path,
+            max_num_raw_imgs=0,
+        )
+        flickr_img_getter = FlickrImgGetter()
+        with tqdm(total=training_request.num_images) as pbar:
+            batch_size = 10
+            batch = []
+            for flickr_img in flickr_img_getter.get_flickr_imgs(training_request.search_term):
+                while len(batch) < batch_size:
+                    batch.append(flickr_img)
+
+                # Process the batch
+                # Sacrifice bandwidth for the sake of speed. Fetch all the images in parallel.
+                print("Fetching images in parallel...", flush=True)
+                image_jobs = []
+                for batch_img in batch:
+                    image_jobs.append(config.QUEUE.enqueue(self.async_fetch_image_and_hash, batch_img.url))
+                img_jobs_to_be_done = len(image_jobs)
+                while img_jobs_to_be_done > 0:
+                    img_jobs_to_be_done = len([j for j in image_jobs if j.result is None])
+                    time.sleep(0.1)
+                    print("  Waiting for %d fetch jobs to finish..." % img_jobs_to_be_done, flush=True)
+                
+                # Then check for dupes.
+                print("Checking for dupes...", flush=True)
+                images_hashes = [j.result for j in image_jobs]
+                non_dupes = [img for img, hsh in images_hashes if not self.has_img_with_hash(hsh)]
+
+                # Finally check for similarity
+                print("Checking for similarity in parallel...", flush=True)
+                similarity_jobs = []
+                for new_img in non_dupes:
+                    similarity_jobs.append(config.QUEUE.enqueue(self.async_is_similar, new_img, sim, training_request.min_threshold))
+                similarity_jobs_to_be_done = len(similarity_jobs)
+                while similarity_jobs_to_be_done > 0:
+                    similarity_jobs_to_be_done = len([j for j in similarity_jobs if j.result is None])
+                    time.sleep(0.1)
+                    print("Waiting for %d similarity jobs to finish..." % similarity_jobs_to_be_done, flush=True)
+                    
+                for img, is_similar in zip(non_dupes, [j.result for j in similarity_jobs]):
+                    if is_similar:
+                        self.save_img_url_to_training(img.url)
+                        # self._save_tags_to_cache(img.tags)
+                        # self._save_title_to_cache(img.title)
+                        # num_images += 1
+                        # pbar.update(1)
+                    # else:
+                    #     self.save_img_url_to_rejects(img.url)
+
+
+    ##############################################################
+    # Helpers for parallel training image fetching
+    ##############################################################
+    def async_fetch_image_and_hash(self, url: str) -> Tuple[Image.Image, str]:
+        """
+        Fetch an image and return its hash.
+        """
+        img = self.fetch_image_at_url(url)
+        hsh = sha256(img.tobytes()).hexdigest()
+        return img, hsh
+
+    def has_img_with_hash(self, hsh: str) -> bool:
+        """
+        Check if we have an image with the given hash.
+        """
+        return hsh in self.image_cache['hashes']
+
+    def async_is_similar(self, img: Image, sim_getter: SimilarImgGetter, threshold: float):
+        """
+        Helper function to save an image if it is similar enough to the target set.
+        """
+        similarity = sim_getter.get_image_similarity(img)
+        if similarity < threshold:
+            return False
+        else:
+            return True
