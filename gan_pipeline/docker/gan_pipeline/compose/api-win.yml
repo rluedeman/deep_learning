@@ -28,7 +28,12 @@ services:
     restart: always
     ports: 
       - '6379:6379'
-    command: redis-server
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      # Bind the host machine folders
+      - type: "bind"
+        source: "C:\\Users\\rober\\Dropbox\\projects\\fun\\deep_learning\\data\\gan_pipeline\\redis_data"
+        target: "/data"
   rq-worker:
     image: rluedeman/gan-pipeline
     deploy: 

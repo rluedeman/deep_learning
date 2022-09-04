@@ -2,6 +2,7 @@ from ast import Str
 from functools import lru_cache
 from hashlib import sha256
 from io import BytesIO
+import json
 from lib2to3.pytree import Base
 import os
 import pickle
@@ -21,6 +22,20 @@ from gan_pipeline.similarity import SimilarImgGetter
 
 class GanPipelineMissingException(Exception):
     pass
+
+####################
+# Redis Structure
+####################
+"""
+The redis database supports locating images by url or hash.
+The following keys are used:
+    Key: <gan_project>:<image_url>
+    Value: {'path': <path_to_image>, 'hash': <hash_of_image>}
+
+    Key: <gan_project>:<image_hash>
+    Value: {'path': <path_to_image>, 'hash': <hash_of_image>}
+"""
+
 
 
 ####################
@@ -73,6 +88,253 @@ class TrainingImagesRequest(BaseModel):
     min_threshold: float = 0.85
 
 
+
+####################
+# Model Backends
+####################
+class GanPipelineModelBackendPickle:
+    """
+    Backend for GanPipelineModel using pickle.
+    """
+    def __init__(self, base_dir_path, model) -> None:
+        """
+        Initialize the GanPipelineModelBackendPickle.
+
+        Note: Only need to accept the model as an argument to support backwards compatibility with
+            searching through directories for files with specific names. Newer datasets use the 
+            cache exclusively.
+        """
+        self.path = base_dir_path
+        self.model = model
+        # Load the image cache
+        print("Loading image cache...")
+        self.load_image_cache()
+        print("  Done.")
+
+    # Track state of img fetching
+    def load_image_cache(self):
+        """
+        Get the image cache for the model. Keeps track of which urls have been visited and
+        the hashes of the images that have been saved.
+        """
+        path = os.path.join(self.path, 'image_cache.pkl')
+        if os.path.exists(path):
+            print("Opening:", path)
+            with open(path, 'rb') as f:
+                self.image_cache = pickle.load(f)
+        else:
+            self.image_cache = {'urls': set(), 'hashes': set(), 'img_count_last_saved': 0}
+            self.save_image_cache()
+        
+        if 'tags' not in self.image_cache:
+            self.image_cache['tags'] = []
+        if 'titles' not in self.image_cache:
+            self.image_cache['titles'] = []
+
+    def save_image_cache(self):
+        """
+        Snapshot the image cache for the model.
+        """
+        path = os.path.join(self.path, 'image_cache.pkl')
+        with open(path, 'wb') as f:
+            pickle.dump(self.image_cache, f)
+
+    def has_saved_img(self, img_url: str) -> bool:
+        """
+        Check if an image has been saved.
+        """
+        # First check to see if we've hit the url
+        if img_url in self.image_cache['urls']:
+            return True
+        
+        # Check the hashes to see if we fetched the image but just at a different url (CDN, etc.)
+        img = self.fetch_image_at_url(img_url)
+        hsh = sha256(img.tobytes()).hexdigest()
+        if hsh in self.image_cache['hashes']:
+            return True
+
+        # Lastly, check to see if the file already exists
+        img_paths = [
+            os.path.join(self.model.target_path, f"{hsh}.jpg"),
+            os.path.join(self.model.calibration_path, f"{hsh}.jpg"),
+            os.path.join(self.model.training_path, f"{hsh}.jpg"),
+        ]
+
+        for img_path in img_paths:
+            if os.path.exists(img_path):
+                return True
+
+        return False
+
+    @lru_cache(maxsize=100)
+    def fetch_image_at_url(self, img_url: str, num_retries: int=0) -> Image:
+        """
+        Fetch an image at a url.
+        """
+        if num_retries > 3:
+            # Something funky with the url. Just return a blank image.
+            return Image.new('RGB', (512, 512))
+        try:
+            img_response = requests.get(img_url)
+            return Image.open(BytesIO(img_response.content))
+        except Exception:
+            return self.fetch_image_at_url(img_url, num_retries=num_retries + 1)
+
+    def save_image_url_to_dir(self, img_url: str, dir: str):
+        """
+        Save an image to a path.
+        """
+        img = self.fetch_image_at_url(img_url)
+        hsh = sha256(img.tobytes()).hexdigest()  # Hash based on the original image
+        img = self.crop_and_resize_image(img)
+        img_path = os.path.join(dir, f"{hsh}.jpg")
+        img.save(img_path)
+        self.image_cache['urls'].add(img_url)
+        self.image_cache['hashes'].add(hsh)
+            
+        # Save every 100 images
+        if len(self.image_cache['hashes']) - self.image_cache['img_count_last_saved'] > 100:
+            self.save_image_cache()
+            self.image_cache['img_count_last_saved'] = len(self.image_cache['hashes'])
+    
+    def save_tags_to_cache(self, tags: str):
+        """
+        Save tags to the cache.
+        """
+        self.image_cache['tags'].append(tags)
+        self.save_image_cache()
+
+    def save_title_to_cache(self, title: str):
+        """
+        Save title to the cache.
+        """
+        self.image_cache['titles'].append(title)
+        self.save_image_cache()
+
+    def crop_and_resize_image(self, img: Image) -> Image:
+        """
+        Crop and resize an image.
+        """
+        # Crop the image
+        new_width = min(img.width, img.height)
+        new_height = new_width
+        left = (img.width - new_width)/2
+        top = (img.height - new_height)/2
+        right = (img.width + new_width)/2
+        bottom = (img.height + new_height)/2
+        img = img.crop((left, top, right, bottom))
+        # Resize the image
+        img = img.resize((512, 512))
+        return img
+
+
+class GanPipelineModelBackendRedis:
+    """
+    Backend for GanPipelineModel using Redis.
+    """
+    def __init__(self, name, base_dir_path, model) -> None:
+        """
+        Initialize the GanPipelineModelBackendRedis.
+
+        Note: Only need to accept the model as an argument to support backwards compatibility with
+            searching through directories for files with specific names. Newer datasets use the 
+            cache exclusively.
+        """
+        self.name = name
+        self.path = base_dir_path
+        self.model = model
+
+    def has_saved_img(self, img_url: str) -> bool:
+        """
+        Check if an image has been saved.
+        """
+        # Do we have the image url in redis?
+        img_val = config.REDIS_CONN.get(f'{self.name}:{img_url}')
+        if img_val is not None:
+            return True
+
+        # If not in redis, fetch the image and check the hash
+        img = self.fetch_image_at_url(img_url)
+        hsh = sha256(img.tobytes()).hexdigest()
+        hsh_val = config.REDIS_CONN.get(f'{self.name}:{hsh}')
+        if hsh_val is not None:
+            return True
+
+        # Lastly, check to see if the file already exists
+        img_paths = [
+            os.path.join(self.model.target_path, f"{hsh}.jpg"),
+            os.path.join(self.model.calibration_path, f"{hsh}.jpg"),
+            os.path.join(self.model.training_path, f"{hsh}.jpg"),
+        ]
+
+        for img_path in img_paths:
+            if os.path.exists(img_path):
+                return True
+
+        return False
+
+    @lru_cache(maxsize=100)
+    def fetch_image_at_url(self, img_url: str, num_retries: int=0) -> Image:
+        """
+        Fetch an image at a url. Caches in memory and on disk before hitting network.
+        """
+        img_val = config.REDIS_CONN.get(f'{self.name}:{img_url}')
+        if img_val is not None:
+            path = json.loads(img_val)['path']
+            return Image.open(path)
+        
+        # If not in redis, fetch from web
+        if num_retries > 3:
+            # Something funky with the url. Just return a blank image.
+            return Image.new('RGB', (512, 512))
+        try:
+            img_response = requests.get(img_url)
+            return Image.open(BytesIO(img_response.content))
+        except Exception:
+            return self.fetch_image_at_url(img_url, num_retries=num_retries + 1)
+
+    def save_image_url_to_dir(self, img_url: str, dir: str):
+        """
+        Save an image to a path.
+        """
+        img = self.fetch_image_at_url(img_url)
+        hsh = sha256(img.tobytes()).hexdigest()  # Hash based on the original image
+        img = self.crop_and_resize_image(img)
+        img_path = os.path.join(dir, f"{hsh}.jpg")
+        img.save(img_path)
+        config.REDIS_CONN.set(f'{self.model.name}:{img_url}', json.dumps({'path': img_path, 'hash': hsh}))
+        config.REDIS_CONN.set(f'{self.model.name}:{hsh}', json.dumps({'path': img_path, 'hash': hsh}))
+    
+    def save_tags_to_cache(self, tags: str):
+        """
+        Save tags to the cache.
+        """
+        # Nothing for now for redis backend
+        pass
+
+    def save_title_to_cache(self, title: str):
+        """
+        Save title to the cache.
+        """
+        # Nothing for now for redis backend
+        pass
+
+    def crop_and_resize_image(self, img: Image) -> Image:
+        """
+        Crop and resize an image.
+        """
+        # Crop the image
+        new_width = min(img.width, img.height)
+        new_height = new_width
+        left = (img.width - new_width)/2
+        top = (img.height - new_height)/2
+        right = (img.width + new_width)/2
+        bottom = (img.height + new_height)/2
+        img = img.crop((left, top, right, bottom))
+        # Resize the image
+        img = img.resize((512, 512))
+        return img
+
 ####################
 # "ORM" Models
 ####################
@@ -93,10 +355,9 @@ class GanPipelineModel():
         if not os.path.exists(self.path):
             raise GanPipelineMissingException(f"GanPipelineModel {self.name} does not exist.")
         
-        # Load the image cache
-        print("Loading image cache...")
-        self.load_image_cache()
-        print("  Done.")
+        # Create the backend
+        # self.model_backend = GanPipelineModelBackendPickle(self.path, self)
+        self.model_backend = GanPipelineModelBackendRedis(self.name, self.path, self)
     
     # Path helpers
     @property
@@ -135,159 +396,78 @@ class GanPipelineModel():
     @property
     def num_training_images(self) -> int:
         return len(os.listdir(self.training_path))
+    
+    # ## TODO: Fix the next four methods to work with redis
+    # def _save_image_url_to_dir(self, img_url: str, dir: str):
+    #     """
+    #     Save an image to a path.
+    #     """
+    #     img = self.fetch_image_at_url(img_url)
+    #     hsh = sha256(img.tobytes()).hexdigest()  # Hash based on the original image
+    #     img = self.crop_and_resize_image(img)
+    #     img_path = os.path.join(dir, f"{hsh}.jpg")
+    #     img.save(img_path)
+    #     self.image_cache['urls'].add(img_url)
+    #     self.image_cache['hashes'].add(hsh)
+            
+    #     if len(self.image_cache['hashes']) - self.image_cache['img_count_last_saved'] > 100:
+    #         self.save_image_cache()
+    #         self.image_cache['img_count_last_saved'] = len(self.image_cache['hashes'])
 
-    # Track state of img fetching
-    def load_image_cache(self):
-        """
-        Get the image cache for the model. Keeps track of which urls have been visited and
-        the hashes of the images that have been saved.
-        """
-        path = os.path.join(self.path, 'image_cache.pkl')
-        if os.path.exists(path):
-            self.image_cache = pickle.load(open(path, 'rb'))
-        else:
-            self.image_cache = {'urls': set(), 'hashes': set(), 'img_count_last_saved': 0}
-            self.save_image_cache()
-        
-        if 'tags' not in self.image_cache:
-            self.image_cache['tags'] = []
-        if 'titles' not in self.image_cache:
-            self.image_cache['titles'] = []
+    # def _save_img_to_dir(self, img: Image, dir: str):
+    #     """
+    #     Save an image to a path.
+    #     """
+    #     hsh = sha256(img.tobytes()).hexdigest()
+    #     img_path = os.path.join(dir, f"{hsh}.jpg")
+    #     img.save(img_path)
+    #     self.image_cache['hashes'].add(hsh)
+    #     if len(self.image_cache['hashes']) - self.image_cache['img_count_last_saved'] > 100:
+    #         self.save_image_cache()
+    #         self.image_cache['img_count_last_saved'] = len(self.image_cache['hashes'])
 
-    def save_image_cache(self):
-        """
-        Snapshot the image cache for the model.
-        """
-        path = os.path.join(self.path, 'image_cache.pkl')
-        pickle.dump(self.image_cache, open(path, 'wb'))
+    # def _save_tags_to_cache(self, tags: str):
+    #     """
+    #     Save tags to the cache.
+    #     """
+    #     self.image_cache['tags'].append(tags)
+    #     self.save_image_cache()
 
-    def has_saved_img(self, img_url: str) -> bool:
-        """
-        Check if an image has been saved.
-        """
-        # First check to see if we've hit the url
-        if img_url in self.image_cache['urls']:
-            return True
-        
-        # Check the hashes to see if we fetched the image but just at a different url (CDN, etc.)
-        img = self.fetch_image_at_url(img_url)
-        hsh = sha256(img.tobytes()).hexdigest()
-        if hsh in self.image_cache['hashes']:
-            return True
-
-        # Lastly, check to see if the file already exists
-        img_paths = [
-            os.path.join(self.target_path, f"{hsh}.jpg"),
-            os.path.join(self.calibration_path, f"{hsh}.jpg"),
-            os.path.join(self.training_path, f"{hsh}.jpg"),
-        ]
-
-        for img_path in img_paths:
-            if os.path.exists(img_path):
-                return True
-
-        return False
+    # def _save_title_to_cache(self, title: str):
+    #     """
+    #     Save title to the cache.
+    #     """
+    #     self.image_cache['titles'].append(title)
+    #     self.save_image_cache()
 
     def is_valid_img(self, img_url: str) -> bool:
         """
         Check if an image is valid.
         """
         try:
-            img = self.fetch_image_at_url(img_url)
+            img = self.model_backend.fetch_image_at_url(img_url)
             # Confirm the image is RGB
             return img.mode == 'RGB'
         except Exception:
             return False
 
-    @lru_cache(maxsize=100)
-    def fetch_image_at_url(self, img_url: str, num_retries: int=0) -> Image:
-        """
-        Fetch an image at a url.
-        """
-        if num_retries > 3:
-            # Something funky with the url. Just return a blank image.
-            return Image.new('RGB', (512, 512))
-        try:
-            img_response = requests.get(img_url)
-            return Image.open(BytesIO(img_response.content))
-        except Exception:
-            return self.fetch_image_at_url(img_url, num_retries=num_retries + 1)
-
-    def crop_and_resize_image(self, img: Image) -> Image:
-        """
-        Crop and resize an image.
-        """
-        # Crop the image
-        new_width = min(img.width, img.height)
-        new_height = new_width
-        left = (img.width - new_width)/2
-        top = (img.height - new_height)/2
-        right = (img.width + new_width)/2
-        bottom = (img.height + new_height)/2
-        img = img.crop((left, top, right, bottom))
-        # Resize the image
-        img = img.resize((512, 512))
-        return img
-
     def save_img_url_to_calibration(self, img_url: str):
         """
         Save an image to the calibration directory.
         """
-        self._save_image_url_to_dir(img_url, self.calibration_path)
+        self.model_backend.save_image_url_to_dir(img_url, self.calibration_path)
 
     def save_img_url_to_training(self, img_url: str):
         """
         Save an image to the training directory.
         """
-        self._save_image_url_to_dir(img_url, self.training_path)
+        self.model_backend.save_image_url_to_dir(img_url, self.training_path)
 
     def save_img_url_to_rejects(self, img_url: str):
         """
         Save an image to the rejects directory.
         """
-        self._save_image_url_to_dir(img_url, self.rejects_path)
-
-    def _save_image_url_to_dir(self, img_url: str, dir: str):
-        """
-        Save an image to a path.
-        """
-        img = self.fetch_image_at_url(img_url)
-        hsh = sha256(img.tobytes()).hexdigest()  # Hash based on the original image
-        img = self.crop_and_resize_image(img)
-        img_path = os.path.join(dir, f"{hsh}.jpg")
-        img.save(img_path)
-        self.image_cache['urls'].add(img_url)
-        self.image_cache['hashes'].add(hsh)
-            
-        if len(self.image_cache['hashes']) - self.image_cache['img_count_last_saved'] > 100:
-            self.save_image_cache()
-            self.image_cache['img_count_last_saved'] = len(self.image_cache['hashes'])
-
-    def _save_img_to_dir(self, img: Image, dir: str):
-        """
-        Save an image to a path.
-        """
-        hsh = sha256(img.tobytes()).hexdigest()
-        img_path = os.path.join(dir, f"{hsh}.jpg")
-        img.save(img_path)
-        self.image_cache['hashes'].add(hsh)
-        if len(self.image_cache['hashes']) - self.image_cache['img_count_last_saved'] > 100:
-            self.save_image_cache()
-            self.image_cache['img_count_last_saved'] = len(self.image_cache['hashes'])
-
-    def _save_tags_to_cache(self, tags: str):
-        """
-        Save tags to the cache.
-        """
-        self.image_cache['tags'].append(tags)
-        self.save_image_cache()
-
-    def _save_title_to_cache(self, title: str):
-        """
-        Save title to the cache.
-        """
-        self.image_cache['titles'].append(title)
-        self.save_image_cache()
+        self.model_backend.save_image_url_to_dir(img_url, self.rejects_path)
     
     #####################
     # Image Access Helpers
@@ -322,7 +502,7 @@ class GanPipelineModel():
         num_images = 0
         with tqdm(total=calibration_request.num_images) as pbar:
             for img_url in img_urls:
-                if self.has_saved_img(img_url) or not self.is_valid_img(img_url):
+                if self.model_backend.has_saved_img(img_url) or not self.is_valid_img(img_url):
                     continue
                 else:
                     self.save_img_url_to_calibration(img_url)
@@ -383,13 +563,13 @@ class GanPipelineModel():
                    
 
                 # Do we already have the image? If so, skip it.
-                if self.has_saved_img(flickr_img.url) or not self.is_valid_img(flickr_img.url):
+                if self.model_backend.has_saved_img(flickr_img.url) or not self.is_valid_img(flickr_img.url):
                     has_img += 1                        
                     continue
             
                 
                 # Is the image similar enough to our target set?
-                img = self.fetch_image_at_url(flickr_img.url)
+                img = self.model_backend.fetch_image_at_url(flickr_img.url)
                 similarity = sim.get_image_similarity(img)
                 if similarity < training_request.min_threshold:
                     self.save_img_url_to_rejects(flickr_img.url)
@@ -398,13 +578,12 @@ class GanPipelineModel():
 
                 # Save the image
                 self.save_img_url_to_training(flickr_img.url)
-                self._save_tags_to_cache(flickr_img.tags)
-                self._save_title_to_cache(flickr_img.title)
+                self.model_backend.save_tags_to_cache(flickr_img.tags)
+                self.model_backend.save_title_to_cache(flickr_img.title)
                 num_images += 1
                 pbar.update(1)
             
                 if num_images >= training_request.num_images:
-                    self.save_image_cache()
                     break
 
     def add_training_images_parallel(self, training_request: TrainingImagesRequest):
