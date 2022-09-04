@@ -69,8 +69,8 @@ class FlickrImgGetter(ImgGetter):
                 if url:
                     yield FlickrImg(url, photo.get('title'), photo.get('tags'))
 
-                # Don't search more than 1k photos per upload time window to avoid duplicates.
-                if num_photos_in_query >= 500:
+                # Limit amount per query to minimize duplicate images.
+                if num_photos_in_query >= 100:
                     break
 
             cur_time += time_window
