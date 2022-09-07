@@ -86,4 +86,4 @@ python train.py --cfg=stylegan2  --gamma=0.8192 --gpus=2 --batch=128 --batch-gpu
 # Train at 128 to start
 python train.py --cfg=stylegan2  --gamma=0.2 --gpus=2 --batch=128 --batch-gpu=64 --mirror=1 --tick=90 --snap=5 --map-depth=2 --glr=0.0025 --dlr=0.0025 --cbase=8192 --kimg=10000 --outdir ../../datasets/gan_pipeline/Food/experiments --data=../../datasets/gan_pipeline/Food/Data/Food128_96k.zip
 
-python train.py --cfg=stylegan2  --gamma=0.2 --gpus=2 --batch=256 --batch-gpu=128 --mirror=1 --tick=90 --snap=5 --map-depth=2 --glr=0.0025 --dlr=0.0025 --cbase=8192 --kimg=10000 --outdir ../../datasets/gan_pipeline/Food/experiments --data=../../datasets/gan_pipeline/Food/Data/Food128_96k.zip
+python train.py --cfg=stylegan2  --gamma=0.2 --gpus=2 --batch=128 --batch-gpu=64 --mirror=1 --tick=90 --snap=5 --map-depth=2 --glr=0.0025 --dlr=0.0025 --cbase=16384 --kimg=30000 --outdir ../../datasets/gan_pipeline/Food/experiments --data=../../datasets/gan_pipeline/Food/Data/Food128_160k.zip
