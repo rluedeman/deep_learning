@@ -1,0 +1,10 @@
+- Support for parallel image fetching, currently single-threaded    
+    - Use redis rather than pickle to store cache.
+    - Store fetched images in redis
+- Support for other data sources beyond flickr
+- Automate the training routine for stylegan (hyperparameter search over gamma and learning rate decay)
+- wandb for training
+- store image hashes in cache (so don't need to store local rejects). urls are too volatile.
+
+
+
