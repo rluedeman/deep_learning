@@ -80,8 +80,6 @@ async def post_training_images(project_name: str, training_request: TrainingImag
         print("Adding training images to {}".format(project_name))
         model = GanPipelineModel(project_name)
         model.add_training_images(training_request)
-        # model.add_training_images_parallel(training_request)
-        # config.QUEUE.enqueue(model.add_training_images, training_request)
         return training_request
     except GanPipelineMissingException as e:
         # Return a 404 error if the project doesn't exist
@@ -135,7 +133,7 @@ async def get_filtered_calibration_images_html(
     Return an HTML page with a list of filtered calibration images.
     """
     try:
-        print("Filtering calibration images for {}".format(project_name))
+        print(f"Filtering calibration images for {project_name}. Thresholds: {min_threshold}-{max_threshold}")
         model = GanPipelineModel(project_name)
         request = FilterCalibrationImagesRequest(min_threshold=min_threshold, max_threshold=max_threshold, num_images=num_images)
         filtered_response = model.filter_calibration_images(request)

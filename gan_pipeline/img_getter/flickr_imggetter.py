@@ -38,18 +38,19 @@ class FlickrImgGetter(ImgGetter):
     def __init__(self):
         self.flickr_api = flickrapi.FlickrAPI(config.FLICKR_API_KEY, config.FLICKR_API_SECRET, cache=True)
 
-    def get_flickr_imgs(self, search_term: str) -> Iterable[FlickrImg]:
+    def get_flickr_imgs(self, search_term: str, time_window_days=2, query_max=100, verbose=True) -> Iterable[FlickrImg]:
         """
         A generator that will return an iterable of FlickrImgs matching the search_term.
         """
         min_time = datetime(2010, 1, 1)
         max_time = datetime(2022, 1, 1)
         cur_time = min_time
-        time_window = timedelta(days=2)
+        time_window = timedelta(days=time_window_days)
         while cur_time < max_time:
             start_date = time.mktime(cur_time.timetuple())
             end_date = time.mktime((cur_time + time_window).timetuple())
-            print("****************** Date:", cur_time, cur_time + time_window)
+            if verbose:
+                print("****************** Date:", cur_time, cur_time + time_window)
             photos = self.flickr_api.walk(
                 # tag_mode='all',
                 # tags=search_term,
@@ -70,12 +71,12 @@ class FlickrImgGetter(ImgGetter):
                     yield FlickrImg(url, photo.get('title'), photo.get('tags'))
 
                 # Limit amount per query to minimize duplicate images.
-                if num_photos_in_query >= 100:
+                if num_photos_in_query >= query_max:
                     break
 
             cur_time += time_window
 
-    def get_img_urls(self, search_term: str) -> Tuple[str, str]:
+    def _get_img_urls(self, search_term: str) -> Tuple[str, str]:
         photos = self.flickr_api.walk(
             # tag_mode='all',
             # tags=search_term,
@@ -91,7 +92,7 @@ class FlickrImgGetter(ImgGetter):
             if url:
                 yield url
 
-    def get_images(self, search_term: str, num_images: int) -> Tuple[Image.Image, str]:
+    def _get_images(self, search_term: str, num_images: int) -> Tuple[Image.Image, str]:
         photos = self.flickr_api.walk(
             # tag_mode='all',
             # tags=search_term,

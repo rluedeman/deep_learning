@@ -69,17 +69,28 @@ class SimilarImgGetter(object):
 
         # TODO: For now, assuming all datasets fit in memory. This is a risky assumption...
         # If we received a directory, extract the Images from it.
-        if self.raw_img_dir:
-            self.raw_img_paths = [os.path.join(raw_img_dir, f) for f in os.listdir(raw_img_dir)[:self.max_num_raw_imgs]]
-            self.raw_imgs = [Image.open(path) for path in self.raw_img_paths]
-            for idx, img in enumerate(self.raw_imgs):
-                if img.mode != "RGB":
-                    print("Invalid:", self.raw_img_paths[idx], flush=True)
+        # But first, check to make sure they are the appropriate format.
+        # If the wrong format, delete the image and try again. (not efficient, but meh for now)
+        self.raw_imgs = []
+        self.raw_img_paths = [os.path.join(raw_img_dir, f) for f in os.listdir(raw_img_dir)]
+        while len(self.raw_imgs) < self.max_num_raw_imgs:
+            img = Image.open(self.raw_img_paths[len(self.raw_imgs)])
+            if img.mode == "RGB":
+                self.raw_imgs.append(img)
+            else:
+                print("Invalid Img. Deleting: {}".format(self.raw_img_paths[len(self.raw_imgs)]))
+                os.remove(self.raw_img_paths[len(self.raw_imgs)])
+                self._set_raw_imgs(raw_img_dir, [])
+                return
 
         # Convert the images to feature vectors.
         self.raw_vectors = []
         for img in tqdm(self.raw_imgs, desc="Computing Raw Vectors"):
-            self.raw_vectors.append(self._img2vec.get_vec(img))
+            try:
+                self.raw_vectors.append(self._img2vec.get_vec(img))
+            except RuntimeError:
+                # Usually a # of channels error.
+                pass
 
     def _compute_target_similarities(self) -> None:
         """

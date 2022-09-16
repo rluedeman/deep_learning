@@ -37,10 +37,12 @@ services:
   rq-worker:
     image: rluedeman/gan-pipeline
     deploy: 
-      replicas: 2
-    command: bash -c "rq worker --with-scheduler --url=redis://redis-service:6379"
+      replicas: 8 
+    command: bash -c "sleep 4; rq worker --with-scheduler --url=redis://redis-service:6379"
     env_file:
       - env.txt
+    logging:
+      driver: "none"
     volumes:
       # Bind the host machine folders
       - type: "bind"

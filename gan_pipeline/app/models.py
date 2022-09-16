@@ -92,142 +92,6 @@ class TrainingImagesRequest(BaseModel):
 ####################
 # Model Backends
 ####################
-class GanPipelineModelBackendPickle:
-    """
-    Backend for GanPipelineModel using pickle.
-    """
-    def __init__(self, base_dir_path, model) -> None:
-        """
-        Initialize the GanPipelineModelBackendPickle.
-
-        Note: Only need to accept the model as an argument to support backwards compatibility with
-            searching through directories for files with specific names. Newer datasets use the 
-            cache exclusively.
-        """
-        self.path = base_dir_path
-        self.model = model
-        # Load the image cache
-        print("Loading image cache...")
-        self.load_image_cache()
-        print("  Done.")
-
-    # Track state of img fetching
-    def load_image_cache(self):
-        """
-        Get the image cache for the model. Keeps track of which urls have been visited and
-        the hashes of the images that have been saved.
-        """
-        path = os.path.join(self.path, 'image_cache.pkl')
-        if os.path.exists(path):
-            print("Opening:", path)
-            with open(path, 'rb') as f:
-                self.image_cache = pickle.load(f)
-        else:
-            self.image_cache = {'urls': set(), 'hashes': set(), 'img_count_last_saved': 0}
-            self.save_image_cache()
-        
-        if 'tags' not in self.image_cache:
-            self.image_cache['tags'] = []
-        if 'titles' not in self.image_cache:
-            self.image_cache['titles'] = []
-
-    def save_image_cache(self):
-        """
-        Snapshot the image cache for the model.
-        """
-        path = os.path.join(self.path, 'image_cache.pkl')
-        with open(path, 'wb') as f:
-            pickle.dump(self.image_cache, f)
-
-    def has_saved_img(self, img_url: str) -> bool:
-        """
-        Check if an image has been saved.
-        """
-        # First check to see if we've hit the url
-        if img_url in self.image_cache['urls']:
-            return True
-        
-        # Check the hashes to see if we fetched the image but just at a different url (CDN, etc.)
-        img = self.fetch_image_at_url(img_url)
-        hsh = sha256(img.tobytes()).hexdigest()
-        if hsh in self.image_cache['hashes']:
-            return True
-
-        # Lastly, check to see if the file already exists
-        img_paths = [
-            os.path.join(self.model.target_path, f"{hsh}.jpg"),
-            os.path.join(self.model.calibration_path, f"{hsh}.jpg"),
-            os.path.join(self.model.training_path, f"{hsh}.jpg"),
-        ]
-
-        for img_path in img_paths:
-            if os.path.exists(img_path):
-                return True
-
-        return False
-
-    @lru_cache(maxsize=100)
-    def fetch_image_at_url(self, img_url: str, num_retries: int=0) -> Image:
-        """
-        Fetch an image at a url.
-        """
-        if num_retries > 3:
-            # Something funky with the url. Just return a blank image.
-            return Image.new('RGB', (512, 512))
-        try:
-            img_response = requests.get(img_url)
-            return Image.open(BytesIO(img_response.content))
-        except Exception:
-            return self.fetch_image_at_url(img_url, num_retries=num_retries + 1)
-
-    def save_image_url_to_dir(self, img_url: str, dir: str):
-        """
-        Save an image to a path.
-        """
-        img = self.fetch_image_at_url(img_url)
-        hsh = sha256(img.tobytes()).hexdigest()  # Hash based on the original image
-        img = self.crop_and_resize_image(img)
-        img_path = os.path.join(dir, f"{hsh}.jpg")
-        img.save(img_path)
-        self.image_cache['urls'].add(img_url)
-        self.image_cache['hashes'].add(hsh)
-            
-        # Save every 100 images
-        if len(self.image_cache['hashes']) - self.image_cache['img_count_last_saved'] > 100:
-            self.save_image_cache()
-            self.image_cache['img_count_last_saved'] = len(self.image_cache['hashes'])
-    
-    def save_tags_to_cache(self, tags: str):
-        """
-        Save tags to the cache.
-        """
-        self.image_cache['tags'].append(tags)
-        self.save_image_cache()
-
-    def save_title_to_cache(self, title: str):
-        """
-        Save title to the cache.
-        """
-        self.image_cache['titles'].append(title)
-        self.save_image_cache()
-
-    def crop_and_resize_image(self, img: Image) -> Image:
-        """
-        Crop and resize an image.
-        """
-        # Crop the image
-        new_width = min(img.width, img.height)
-        new_height = new_width
-        left = (img.width - new_width)/2
-        top = (img.height - new_height)/2
-        right = (img.width + new_width)/2
-        bottom = (img.height + new_height)/2
-        img = img.crop((left, top, right, bottom))
-        # Resize the image
-        img = img.resize((512, 512))
-        return img
-
-
 class GanPipelineModelBackendRedis:
     """
     Backend for GanPipelineModel using Redis.
@@ -278,18 +142,28 @@ class GanPipelineModelBackendRedis:
         """
         Fetch an image at a url. Caches in memory and on disk before hitting network.
         """
-        img_val = config.REDIS_CONN.get(f'{self.name}:{img_url}')
-        if img_val is not None:
-            path = json.loads(img_val)['path']
-            return Image.open(path)
-        
+        # Always fetch from web for now...not bandwidth efficient but that's ok
+        # img_val = config.REDIS_CONN.get(f'{self.name}:{img_url}')
+        # if img_val is not None:
+        #     path = json.loads(img_val)['path']
+        #     try:
+        #         img = Image.open(path)
+        #         print("  Reading from disk...")
+        #         return img
+        #     except FileNotFoundError:
+        #         # Hmm, file is in the cache but not on disk. Must've been deleted.
+        #         # Remove the cache entry and try again.
+        #         config.REDIS_CONN.delete(f'{self.name}:{img_url}')
+        #         return self.fetch_image_at_url(img_url, num_retries=num_retries + 1)
         # If not in redis, fetch from web
         if num_retries > 3:
             # Something funky with the url. Just return a blank image.
             return Image.new('RGB', (512, 512))
         try:
             img_response = requests.get(img_url)
-            return Image.open(BytesIO(img_response.content))
+            img = Image.open(BytesIO(img_response.content))
+            print("  Fetching from web...")
+            return img
         except Exception:
             return self.fetch_image_at_url(img_url, num_retries=num_retries + 1)
 
@@ -298,7 +172,7 @@ class GanPipelineModelBackendRedis:
         Save an image to a path.
         """
         img = self.fetch_image_at_url(img_url)
-        hsh = sha256(img.tobytes()).hexdigest()  # Hash based on the original image
+        hsh = sha256(img.tobytes()).hexdigest()  # Get hash for filename
         img = self.crop_and_resize_image(img)
         img_path = os.path.join(dir, f"{hsh}.jpg")
         img.save(img_path)
@@ -397,49 +271,6 @@ class GanPipelineModel():
     def num_training_images(self) -> int:
         return len(os.listdir(self.training_path))
     
-    # ## TODO: Fix the next four methods to work with redis
-    # def _save_image_url_to_dir(self, img_url: str, dir: str):
-    #     """
-    #     Save an image to a path.
-    #     """
-    #     img = self.fetch_image_at_url(img_url)
-    #     hsh = sha256(img.tobytes()).hexdigest()  # Hash based on the original image
-    #     img = self.crop_and_resize_image(img)
-    #     img_path = os.path.join(dir, f"{hsh}.jpg")
-    #     img.save(img_path)
-    #     self.image_cache['urls'].add(img_url)
-    #     self.image_cache['hashes'].add(hsh)
-            
-    #     if len(self.image_cache['hashes']) - self.image_cache['img_count_last_saved'] > 100:
-    #         self.save_image_cache()
-    #         self.image_cache['img_count_last_saved'] = len(self.image_cache['hashes'])
-
-    # def _save_img_to_dir(self, img: Image, dir: str):
-    #     """
-    #     Save an image to a path.
-    #     """
-    #     hsh = sha256(img.tobytes()).hexdigest()
-    #     img_path = os.path.join(dir, f"{hsh}.jpg")
-    #     img.save(img_path)
-    #     self.image_cache['hashes'].add(hsh)
-    #     if len(self.image_cache['hashes']) - self.image_cache['img_count_last_saved'] > 100:
-    #         self.save_image_cache()
-    #         self.image_cache['img_count_last_saved'] = len(self.image_cache['hashes'])
-
-    # def _save_tags_to_cache(self, tags: str):
-    #     """
-    #     Save tags to the cache.
-    #     """
-    #     self.image_cache['tags'].append(tags)
-    #     self.save_image_cache()
-
-    # def _save_title_to_cache(self, title: str):
-    #     """
-    #     Save title to the cache.
-    #     """
-    #     self.image_cache['titles'].append(title)
-    #     self.save_image_cache()
-
     def is_valid_img(self, img_url: str) -> bool:
         """
         Check if an image is valid.
@@ -455,6 +286,8 @@ class GanPipelineModel():
         """
         Save an image to the calibration directory.
         """
+        print("Saving to calibration:", img_url)
+        print("  ", self.model_backend)
         self.model_backend.save_image_url_to_dir(img_url, self.calibration_path)
 
     def save_img_url_to_training(self, img_url: str):
@@ -498,24 +331,49 @@ class GanPipelineModel():
         Add calibration images to the model.
         """
         flickr_img_getter = FlickrImgGetter()
-        img_urls = flickr_img_getter.get_img_urls(calibration_request.search_term)
+        max_batch_size = 100  # Number of async requests to make at once
+        total_t = time.time()
+        # Keep track of the current batch
         num_images = 0
-        with tqdm(total=calibration_request.num_images) as pbar:
-            for img_url in img_urls:
-                if self.model_backend.has_saved_img(img_url) or not self.is_valid_img(img_url):
-                    continue
-                else:
-                    self.save_img_url_to_calibration(img_url)
-                    num_images += 1
-                    pbar.update(1)
-                    sys.stderr.flush()
-                    pbar.refresh()
-                    sys.stdout.flush()
-                    sys.stderr.flush()
-                    print("\r", flush=True)
+        batch_size = min(max_batch_size, calibration_request.num_images - num_images)
+        fetch_jobs = []
+        print("Preparing initial batch of size: ", batch_size, flush=True)
+        # Iterate over the flickr api until we have enough images
+        for flickr_img in flickr_img_getter.get_flickr_imgs(calibration_request.search_term, time_window_days=3650, verbose=False, query_max=2000):
+            fetch_jobs.append(config.QUEUE.enqueue(self.save_img_url_to_calibration, flickr_img.url))
+            num_images += 1
+            if len(fetch_jobs) >= batch_size:
+                print("Fetching batch of size: ", batch_size, flush=True)
+                batch_t = time.time()
+                update_t = time.time()
+                fetch_jobs_to_be_done = batch_size
+                while fetch_jobs_to_be_done > 0:
+                    fetch_jobs_to_be_done = len([j for j in fetch_jobs if j.get_status(refresh=True) != 'finished'])
+                    time.sleep(0.1)
+                    if time.time() - update_t > 2:
+                        print("  ", fetch_jobs_to_be_done, "images left to fetch", flush=True)
+                        update_t = time.time()
+
+                    if time.time() - batch_t > 60:
+                        print("Timeout waiting for fetch jobs to finish.", flush=True)
+                        return
                 
+                # Print stats about the batch
+                elapsed = time.time() - total_t
+                rate = num_images / elapsed
+                print(f"Fetched:{num_images}, Elapsed:{elapsed:.2f}, Rate:{rate:.2f}/s", flush=True)
+                
+                # Prep for the next batch
+                batch_t = time.time()
+                fetch_jobs = []
+                batch_size = min(max_batch_size, calibration_request.num_images - num_images)
+            
+                # Do we have enough images?
                 if num_images >= calibration_request.num_images:
-                    break
+                    return
+        
+        print("Shortage of images. Only found: ", num_images, flush=True)
+        return
 
     def filter_calibration_images(self, filter_request: FilterCalibrationImagesRequest) -> FilterCalibrationImagesResponse:
         """
@@ -554,7 +412,7 @@ class GanPipelineModel():
             for flickr_img in flickr_img_getter.get_flickr_imgs(training_request.search_term):
                 searched_images += 1
                 if searched_images % 10 == 0:
-                    # Add update to the progress bar
+                    # Add update to th11111111111111111111e progress bar
                     pbar.set_description(f"Have Image: {has_img} | Not Similar: {not_similar} | Saved: {num_images} |||")
                     pbar.refresh()
                     sys.stdout.flush()
@@ -585,86 +443,3 @@ class GanPipelineModel():
             
                 if num_images >= training_request.num_images:
                     break
-
-    def add_training_images_parallel(self, training_request: TrainingImagesRequest):
-        """
-        Add training images to the model but farm out image fetching and similarity comparisons to async queues.
-        """
-        sim = SimilarImgGetter(
-            target_img_dir=self.target_path, 
-            raw_img_dir=self.training_path,
-            max_num_raw_imgs=0,
-        )
-        flickr_img_getter = FlickrImgGetter()
-        with tqdm(total=training_request.num_images) as pbar:
-            batch_size = 10
-            batch = []
-            for flickr_img in flickr_img_getter.get_flickr_imgs(training_request.search_term):
-                while len(batch) < batch_size:
-                    batch.append(flickr_img)
-
-                # Process the batch
-                # Sacrifice bandwidth for the sake of speed. Fetch all the images in parallel.
-                print("Fetching images in parallel...", flush=True)
-                image_jobs = []
-                for batch_img in batch:
-                    image_jobs.append(config.QUEUE.enqueue(self.async_fetch_image_and_hash, batch_img.url))
-                img_jobs_to_be_done = len(image_jobs)
-                while img_jobs_to_be_done > 0:
-                    img_jobs_to_be_done = len([j for j in image_jobs if j.result is None])
-                    time.sleep(0.1)
-                    print("  Waiting for %d fetch jobs to finish..." % img_jobs_to_be_done, flush=True)
-                
-                # Then check for dupes.
-                print("Checking for dupes...", flush=True)
-                images_hashes = [j.result for j in image_jobs]
-                non_dupes = [img for img, hsh in images_hashes if not self.has_img_with_hash(hsh)]
-
-                # Finally check for similarity
-                print("Checking for similarity in parallel...", flush=True)
-                similarity_jobs = []
-                for new_img in non_dupes:
-                    similarity_jobs.append(config.QUEUE.enqueue(self.async_is_similar, new_img, sim, training_request.min_threshold))
-                similarity_jobs_to_be_done = len(similarity_jobs)
-                while similarity_jobs_to_be_done > 0:
-                    similarity_jobs_to_be_done = len([j for j in similarity_jobs if j.result is None])
-                    time.sleep(0.1)
-                    print("Waiting for %d similarity jobs to finish..." % similarity_jobs_to_be_done, flush=True)
-                    
-                for img, is_similar in zip(non_dupes, [j.result for j in similarity_jobs]):
-                    if is_similar:
-                        self.save_img_url_to_training(img.url)
-                        # self._save_tags_to_cache(img.tags)
-                        # self._save_title_to_cache(img.title)
-                        # num_images += 1
-                        # pbar.update(1)
-                    # else:
-                    #     self.save_img_url_to_rejects(img.url)
-
-
-    ##############################################################
-    # Helpers for parallel training image fetching
-    ##############################################################
-    def async_fetch_image_and_hash(self, url: str) -> Tuple[Image.Image, str]:
-        """
-        Fetch an image and return its hash.
-        """
-        img = self.fetch_image_at_url(url)
-        hsh = sha256(img.tobytes()).hexdigest()
-        return img, hsh
-
-    def has_img_with_hash(self, hsh: str) -> bool:
-        """
-        Check if we have an image with the given hash.
-        """
-        return hsh in self.image_cache['hashes']
-
-    def async_is_similar(self, img: Image, sim_getter: SimilarImgGetter, threshold: float):
-        """
-        Helper function to save an image if it is similar enough to the target set.
-        """
-        similarity = sim_getter.get_image_similarity(img)
-        if similarity < threshold:
-            return False
-        else:
-            return True
