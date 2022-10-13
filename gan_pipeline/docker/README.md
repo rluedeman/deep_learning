@@ -80,10 +80,14 @@ python train.py --cfg=stylegan2 --outdir ../learning_deep/experiments/results/tr
 # Fast
 python train.py --cfg=stylegan2 --outdir ../learning_deep/experiments/results/tractors_512/ --data=../../datasets/gan_pipeline/Tractors/Data/tractors512_50k.zip --gamma=0.8192 --gpus=2 --batch=64 --batch-gpu=32 --mirror=1 --snap=20 --map-depth=2 --glr=0.0005 --dlr=0.0005 --cbase=16384 --kimg=30000 --resume=../learning_deep/experiments/results/tractors_512/00017-stylegan2-tractors512_50k-gpus2-batch64-gamma0.8192/network-snapshot-000080.pkl
 
-# Train at 256
-python train.py --cfg=stylegan2  --gamma=0.8192 --gpus=2 --batch=128 --batch-gpu=64 --mirror=1 --tick=6 --snap=30 --map-depth=2 --glr=0.0025 --dlr=0.0025 --cbase=16384 --kimg=5000 --outdir ../../datasets/gan_pipeline/Food/experiments --data=../../datasets/gan_pipeline/Food/Data/Food256_96k.zip
+
 
 # Train at 128 to start
-python train.py --cfg=stylegan2  --gamma=0.2 --gpus=2 --batch=128 --batch-gpu=64 --mirror=1 --tick=90 --snap=5 --map-depth=2 --glr=0.0025 --dlr=0.0025 --cbase=8192 --kimg=10000 --outdir ../../datasets/gan_pipeline/Food/experiments --data=../../datasets/gan_pipeline/Food/Data/Food128_96k.zip
+python train.py --cfg=stylegan2  --gamma=0.2 --gpus=2 --batch=128 --batch-gpu=64 --mirror=1 --tick=90 --snap=5 --map-depth=2 --glr=0.0025 --dlr=0.0025 --cbase=8192 --kimg=30000 --outdir ../../datasets/gan_pipeline/Food/experiments --data=../../datasets/gan_pipeline/Food/Data/Food128_96k.zip
 
 python train.py --cfg=stylegan2  --gamma=0.2 --gpus=2 --batch=128 --batch-gpu=64 --mirror=1 --tick=90 --snap=5 --map-depth=2 --glr=0.0025 --dlr=0.0025 --cbase=16384 --kimg=30000 --outdir ../../datasets/gan_pipeline/Food/experiments --data=../../datasets/gan_pipeline/Food/Data/Food128_160k.zip
+
+# Train at 256
+python train.py --cfg=stylegan2  --gamma=1.6 --gpus=2 --batch=128 --batch-gpu=32 --mirror=1 --tick=4 --snap=10 --map-depth=2 --glr=0.0025 --dlr=0.0025 --cbase=16384 --kimg=5000 --outdir ../../datasets/gan_pipeline/Food/experiments --data=../../datasets/gan_pipeline/Food/Data/Food256_160k.zip
+
+python train.py --cfg=stylegan2  --gamma=1.6 --gpus=2 --batch=192 --batch-gpu=48 --mirror=1 --tick=25 --snap=4 --map-depth=2 --glr=0.0005 --dlr=0.0005 --cbase=32768 --kimg=20000 --outdir ../../datasets/gan_pipeline/Food/experiments --data=../../datasets/gan_pipeline/Food/Data/Food256_160k.zip --resume=../../datasets/gan_pipeline/Food/experiments/00037-stylegan2-Food256_160k-gpus2-batch128-gamma1.6/network-snapshot-001351.pkl
