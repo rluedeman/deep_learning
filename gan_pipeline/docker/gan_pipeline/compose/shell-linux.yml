@@ -24,7 +24,20 @@ services:
       - type: "bind"
         source: "/home/rluedeman/DeepLearning/"
         target: "/src"
+      - type: "volume"
+        source: "nas"
+        target: "/data"
+        volume:
+          nocopy: true
     sysctls:
       net.ipv4.tcp_keepalive_intvl: '45'
       net.ipv4.tcp_keepalive_probes: '15'
       net.ipv4.tcp_keepalive_time: '120'
+
+volumes:
+  nas:
+    driver_opts:
+      type: "cifs"
+      device: "//192.168.1.28/rluedeman"
+      o: "addr=192.168.1.28,rw"
+      o: "uid=0,username=rluedeman,password=VLvbnxcqbQTbo4,file_mode=0770,dir_mode=0770"
