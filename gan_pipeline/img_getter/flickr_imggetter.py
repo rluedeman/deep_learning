@@ -10,6 +10,16 @@ from typing import Iterable, Tuple
 
 from gan_pipeline.img_getter import config
 
+# Snippets for manual testing if/when flickr is being weird.
+# import flickrapi
+# from gan_pipeline.img_getter import config
+# flickr = flickrapi.FlickrAPI(config.FLICKR_API_KEY, config.FLICKR_API_SECRET, cache=True)
+
+
+# from gan_pipeline.img_getter.flickr_imggetter import FlickrImgGetter
+# flickr = FlickrImgGetter()
+# query = flickr.get_flickr_imgs("space")
+# imgs = [next(query) for i in range(10)]
 
 class ImgGetter():
     """
@@ -38,11 +48,11 @@ class FlickrImgGetter(ImgGetter):
     def __init__(self):
         self.flickr_api = flickrapi.FlickrAPI(config.FLICKR_API_KEY, config.FLICKR_API_SECRET, cache=True)
 
-    def get_flickr_imgs(self, search_term: str, time_window_days=2, query_max=100, verbose=True) -> Iterable[FlickrImg]:
+    def get_flickr_imgs(self, search_term: str, time_window_days=3, query_max=100, verbose=True) -> Iterable[FlickrImg]:
         """
         A generator that will return an iterable of FlickrImgs matching the search_term.
         """
-        min_time = datetime(2010, 1, 1)
+        min_time = datetime(2008, 1, 1)
         max_time = datetime(2022, 1, 1)
         cur_time = min_time
         time_window = timedelta(days=time_window_days)

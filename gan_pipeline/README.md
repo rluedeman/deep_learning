@@ -1,5 +1,11 @@
 # A set of tools to efficiently build large, GAN-friendly image datasets
-GAN-friendly = At least 20k images selected from a fairly narrow distribution.
+GAN-friendly = At least 20k images, ideally ~100k images, selected from a fairly narrow distribution.
+
+
+### Steps
+1. Create a Gan Project (POST /gan_projects/)
+2. Fetch some calibration images (POST /gan_projects/{project_name})/calibration_images/)
+3. Define a set of 100-1000 target images in the Gan Project via manual curation. 
 
 ### The tools
 1. ImgScraper
