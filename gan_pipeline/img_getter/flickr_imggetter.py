@@ -34,7 +34,8 @@ class ImgGetter():
 
 
 class FlickrImg(object):
-    def __init__(self, url, title, tags):
+    def __init__(self,
+     url, title, tags):
         self.url = url
         self.title = title
         self.tags = tags
@@ -53,6 +54,7 @@ class FlickrImgGetter(ImgGetter):
         A generator that will return an iterable of FlickrImgs matching the search_term.
         """
         min_time = datetime(2008, 1, 1)
+        min_time = datetime(2013, 7, 1)
         max_time = datetime(2022, 1, 1)
         cur_time = min_time
         time_window = timedelta(days=time_window_days)
@@ -63,10 +65,11 @@ class FlickrImgGetter(ImgGetter):
                 print("****************** Date:", cur_time, cur_time + time_window)
             photos = self.flickr_api.walk(
                 # tag_mode='all',
-                # tags=search_term,
+                # tags="nikon",
                 text=search_term,
-                extras='url_c,license,tags,machine_tags',
+                extras='url_c,license,tags',
                 per_page=100,
+                # sort='interestingness-desc',
                 sort='relevance',
                 min_height=512,
                 min_width=512,
@@ -74,15 +77,28 @@ class FlickrImgGetter(ImgGetter):
                 max_upload_date=end_date,
             )
             num_photos_in_query = 0
-            for photo in photos:
-                num_photos_in_query += 1
-                url = photo.get('url_c')
-                if url:
-                    yield FlickrImg(url, photo.get('title'), photo.get('tags'))
+            # For loop in a while loop so we can restart the query if we get an error.
+            while num_photos_in_query < query_max:
+                # try:
+                for photo in photos:
+                    num_photos_in_query += 1
+                    url = photo.get('url_c')
+                    if url:
+                        yield FlickrImg(url, photo.get('title'), photo.get('tags'))
 
-                # Limit amount per query to minimize duplicate images.
-                if num_photos_in_query >= query_max:
-                    break
+                    # Limit amount per query to minimize duplicate images.
+                    if num_photos_in_query >= query_max:
+                        break
+                # except flickrapi.exceptions.FlickrError as e:
+                #     print("Flickr error:", e)
+                #     print("Restarting query.")
+                #     time.sleep(2)
+                #     continue
+                # except Exception as e:
+                #     print("Error:", e)
+                #     print("Restarting query.")
+                #     time.sleep(2)
+                #     continue
 
             cur_time += time_window
 
