@@ -16,6 +16,9 @@ services:
       - type: "bind"
         source: "C:\\Users\\rober\\Dropbox\\projects\\fun\\deep_learning"
         target: "/src"
+      - type: "bind"
+        source: "C:\\Users\\rober\\Desktop"
+        target: "/desktop"
     sysctls:
       net.ipv4.tcp_keepalive_intvl: '45'
       net.ipv4.tcp_keepalive_probes: '15'
