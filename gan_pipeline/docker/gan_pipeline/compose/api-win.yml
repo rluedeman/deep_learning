@@ -16,6 +16,9 @@ services:
       - type: "bind"
         source: "C:\\Users\\rober\\Dropbox\\projects\\fun\\deep_learning"
         target: "/src"
+      - type: "bind"
+        source: "C:\\Users\\rober\\Desktop\\gan_pipeline\\"
+        target: "/gan_data"
     sysctls:
       net.ipv4.tcp_keepalive_intvl: '45'
       net.ipv4.tcp_keepalive_probes: '15'
@@ -33,7 +36,7 @@ services:
       # Bind the host machine folders
       - type: "bind"
         source: "C:\\Users\\rober\\Dropbox\\projects\\fun\\deep_learning\\data\\gan_pipeline\\redis_data"
-        target: "/data"
+        target: "/redis_data"
   rq-worker:
     image: rluedeman/gan-pipeline
     deploy: 
@@ -48,5 +51,8 @@ services:
       - type: "bind"
         source: "C:\\Users\\rober\\Dropbox\\projects\\fun\\deep_learning"
         target: "/src"
+      - type: "bind"
+        source: "C:\\Users\\rober\\Desktop\\gan_pipeline\\"
+        target: "/gan_data"
     depends_on:
       - redis-service
