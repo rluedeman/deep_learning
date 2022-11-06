@@ -20,6 +20,11 @@ from gan_pipeline.app.config import DATASETS_PATH
 from gan_pipeline.img_getter.flickr_imggetter import FlickrImgGetter
 from gan_pipeline.similarity import SimilarImgGetter
 
+
+CONFIRM_SIMILARITY = False  # If true, will compute similarity. If false, will simply keep all images.
+CACHE_TITLE_METADATA = False  # Set to false to reduce redis overhead. Not currently using cache for much.
+
+
 class GanPipelineMissingException(Exception):
     pass
 
@@ -156,6 +161,7 @@ class GanPipelineModelBackendRedis:
         #         config.REDIS_CONN.delete(f'{self.name}:{img_url}')
         #         return self.fetch_image_at_url(img_url, num_retries=num_retries + 1)
         # If not in redis, fetch from web
+        t = time.time()
         if num_retries > 3:
             # Something funky with the url. Just return a blank image.
             return Image.new('RGB', (512, 512))
@@ -454,16 +460,15 @@ class GanPipelineModel():
                     sys.stdout.flush()
                     sys.stderr.flush()
                     print("\r", flush=True)
-                   
-
                 # Do we already have the image? If so, skip it.
                 if self.model_backend.has_saved_img(flickr_img.url) or not self.is_valid_img(flickr_img.url):
+                    has_img += 1                     
                     continue
             
                 
                 # Is the image similar enough to our target set?
                 img = self.model_backend.fetch_image_at_url(flickr_img.url)
-                similarity = sim.get_image_similarity(img)
+                similarity = sim.get_image_similarity(img) if CONFIRM_SIMILARITY else .99
                 if similarity < training_request.min_threshold:
                     self.save_img_url_to_rejects(flickr_img.url)
                     not_similar += 1
@@ -471,8 +476,9 @@ class GanPipelineModel():
 
                 # Save the image
                 self.save_img_url_to_training(flickr_img.url)
-                self.model_backend.save_tags_to_cache(flickr_img.tags)
-                self.model_backend.save_title_to_cache(flickr_img.title)
+                if CACHE_TITLE_METADATA:
+                    self.model_backend.save_tags_to_cache(flickr_img.tags)
+                    self.model_backend.save_title_to_cache(flickr_img.title)
                 num_images += 1
                 pbar.update(1)
             
@@ -499,7 +505,6 @@ class GanPipelineModel():
         print("Constructing Flickr image getter...", flush=True)
         flickr_img_getter = FlickrImgGetter()
         max_batch_size = 100  # Number of async requests to make at once
-        total_t = time.time()
         # Keep track of the current batch
         num_images_similar = 0
         num_images_total = 0
@@ -537,7 +542,7 @@ class GanPipelineModel():
                 print("  Processing %d new images for similarity..." % len(new_img_dicts), flush=True)
                 for img_dict in new_img_dicts:
                     img = img_dict['img']
-                    similarity = sim.get_image_similarity(img)
+                    similarity = sim.get_image_similarity(img) if CONFIRM_SIMILARITY else .99
                     if similarity >= training_request.min_threshold:
                         self.save_img_url_to_training(img_dict['url'])
                         num_images_similar += 1
