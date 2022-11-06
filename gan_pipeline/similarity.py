@@ -55,7 +55,10 @@ class SimilarImgGetter(object):
         # Convert the images to feature vectors.
         self.target_vectors = []
         for img in tqdm(self.target_imgs, desc="Computing Target Vectors"):
-            self.target_vectors.append(self._img2vec.get_vec(img))
+            try:
+                self.target_vectors.append(self._img2vec.get_vec(img))
+            except:
+                pass
 
     def _set_raw_imgs(self, raw_img_dir: str=None, raw_imgs: list = None) -> None:
         self.raw_imgs = raw_imgs
