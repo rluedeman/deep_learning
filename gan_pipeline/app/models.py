@@ -458,7 +458,6 @@ class GanPipelineModel():
 
                 # Do we already have the image? If so, skip it.
                 if self.model_backend.has_saved_img(flickr_img.url) or not self.is_valid_img(flickr_img.url):
-                    has_img += 1                        
                     continue
             
                 
